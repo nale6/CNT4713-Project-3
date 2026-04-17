@@ -2,7 +2,8 @@ from socket import *
 import sys
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
-from Crypto.Hash import SHA256
+import hashlib
+#from Crypto.Hash import SHA256
 
 
 def generate_keypair():
@@ -40,7 +41,7 @@ def decrypt_message(ciphertext, private_key):
     return cipher_rsa.decrypt(ciphertext)
 
 def compute_sha256(message_bytes):
-    h = SHA256.new(message_bytes)
+    h = hashlib.sha256(message_bytes)
     return h.hexdigest().encode()
 
 def main():

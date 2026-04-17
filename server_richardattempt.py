@@ -2,7 +2,8 @@ from socket import *
 import sys
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
-from Crypto.Hash import SHA256
+import hashlib
+#from Crypto.Hash import SHA256
 
 def generate_keypair():
     private_key = RSA.generate(2048)
@@ -39,7 +40,7 @@ def encrypt_message(message_bytes, public_key_bytes):
     return cipher_rsa.encrypt(message_bytes)
 
 def compute_sha256(message_bytes):
-    h = SHA256.new(message_bytes)
+    h = hashlib.sha256(message_bytes)
     return h.hexdigest().encode()
 
 def main():
@@ -126,7 +127,7 @@ def main():
                     print(f"Responding with hash: {message_hash.decode()}")
                     send_with_length(dataConnection, encrypted_hash)
 
-            print("Client says:", command)
+            #print("Client says:", command)
 
     sys.exit()
 
