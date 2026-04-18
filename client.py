@@ -1,90 +1,138 @@
 from socket import *
 import sys
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_OAEP
+import hashlib
 
-#TODO key pair function, encryption/decryption function logic, display secure/compromised correctly, answers to question and video
-#FUNCTIONALITY: Run server first in one terminal (python server.py or click run) and in another terminal run client (python client.py) and client will connect to server.
+def generate_keypair():
+    private_key = RSA.generate(2048)
+    public_key = private_key.publickey()
+    return private_key, public_key.export_key()
+
+def send_with_length(sock, data_bytes):
+    length = len(data_bytes).to_bytes(4, byteorder="big")
+    sock.sendall(length + data_bytes)
+
+def recv_exact(sock, num_bytes):
+    data = b""
+    while len(data) < num_bytes:
+        packet = sock.recv(num_bytes - len(data))
+        if not packet:
+            return None
+        data += packet
+    return data
+
+def recv_with_length(sock):
+    length_bytes = recv_exact(sock, 4)
+    if not length_bytes:
+        return None
+    length = int.from_bytes(length_bytes, byteorder="big")
+    return recv_exact(sock, length)
+
+def encrypt_message(message_bytes, public_key_bytes):
+    public_key = RSA.import_key(public_key_bytes)
+    cipher_rsa = PKCS1_OAEP.new(public_key)
+    return cipher_rsa.encrypt(message_bytes)
+
+def decrypt_message(ciphertext, private_key):
+    cipher_rsa = PKCS1_OAEP.new(private_key)
+    return cipher_rsa.decrypt(ciphertext)
+
+def compute_sha256(message_bytes):
+    h = hashlib.sha256(message_bytes)
+    return h.hexdigest().encode()
 
 def main():
-  print("Starting client...")
-  print("Creating RSA keypair")
-  #TODO keypair
-  print("RSA keypair created")
+    print("Starting client...")
+    print("Creating RSA keypair")
+    client_private_key, client_public_key = generate_keypair()
+    print("RSA keypair created")
 
-  #Local host for address (can also be empty), port 8080 as per project instructions
-  HOST = '127.0.0.1'
-  PORT = 8080
-  #Setting connected to true for now
-  connected = False
+    HOST = "127.0.0.1"
+    PORT = 8080
+    connected = False
+    dataConnection = None
+    server_public_key = None
+    original_message = b""
 
-  #For client, just need to connect socket
+    print("Creating client socket")
+    client = socket(AF_INET, SOCK_STREAM)
 
-  #On start, need to create public private key pair
+    try:
+        print("Connecting to server")
+        client.connect((HOST, PORT))
+        connected = True
+    except:
+        print("Unable to connect to server.")
+        sys.exit()
 
-  #Ignore this piece of code for now, just testing client server messaging works at all.
-  #Initial query for command. 
-  # command = input("Please enter a command (connect, tunnel, post): ")
+    counter = 0
 
-  # if(command == "connect"):
-  #   connected = True
-  # else:
-  #   print("Connection to server must be first made. Please restart and try 'connect' command.")
+    while connected:
+        counter += 1
+        if(counter == 1):
+            command = "connect"
+        elif(counter == 2):
+            command = "tunnel"
+        elif(counter == 3):
+            command = "post"
+        elif(counter == 4):
+            command = "quit"
 
-  print("Creating client socket")
-  client = socket(AF_INET, SOCK_STREAM)
-  #Try exception block for connection
-  try:
-    print("Connecting to server")
-    client.connect((HOST, PORT))
-    connected = True
-    # print("Connection successful.")
+        client.sendall(command.encode())
 
-  except:
-    print("Unable to connect to server.")
+        match command:
+            case "quit":
+                message = client.recv(1024).decode()
 
-  while connected:
-    #For now if command sent is quit then terminates client and server
-    #This is just for pure testing for now and should be removed later
-    #TODO remove when program fully finished
-    command = input("Enter a command: ")
+                if dataConnection:
+                    dataConnection.close()
+                client.close()
+                break
 
-    client.sendall(command.encode())
+            case "connect":
+                print("Creating data socket")
+                port = int(client.recv(1024).decode().strip())
 
-    match command:
-      #Custom case for quitting just to make testing easier. Not asked for by project.
-      #TODO consider to delete later if not using input for command and instead automating process. If deleted then need to close client before end of program.
-      case "quit":
-        if command == "quit":
-          print("Quitting client.")
-          message = client.recv(1024).decode()
-          print(message)
-          client.close()
-          break
+                dataConnection = socket(AF_INET, SOCK_STREAM)
+                try:
+                    dataConnection.connect((HOST, port))
+                except:
+                    print("Unsuccessful data socket connection")
 
-      case "connect":
-        print("Creating data socket")
-        #Parse string to int and remove newline with strip as newline is used to cut off the message from server to only send us the port number
-        port = int(client.recv(1024).decode().strip())
-        #Debug message
-        # print("Successfully retrieved port from server. Port: ", port)
-        #Form socket object and connect with localhost and the given port number from server for data connection and data transfer
-        dataConnection = socket()
-        try:
-          dataConnection.connect(("127.0.0.1", port))
-          # print("Successful data socket connection")
-        except:
-          print("Unsuccessful data socket connection")
+            case "tunnel":
+                print("Requesting tunnel")
 
-      #TODO case tunnel AND post
-      case "tunnel":  
-        print("Tunnel requested. Sending public key")
-        #TODO tunnel code
+                send_with_length(dataConnection, client_public_key)
 
-      case "post":
-        print("Post requested.")
-        #TODO post code
+                server_public_key = recv_with_length(dataConnection)
 
-    #TODO change comparisons with sha256 hash and make sure it's correct. Compare SHA256 hash of original message and response. This is for secure/compromised section. Can also be function at top.
+                print("Server public key received")
+                print("Tunnel established")
 
-  sys.exit()
+            case "post":
+                print("Post requested.")
+                
+                firstmsg = input("Encrypting message: ").strip()
+                original_message = f"{firstmsg}".encode()
+
+                encrypted_message = encrypt_message(original_message, server_public_key)
+                print(f"Sending encrypted message: {encrypted_message}")
+
+                send_with_length(dataConnection, encrypted_message)
+
+                encrypted_hash = recv_with_length(dataConnection)
+                print("Received hash")
+                print("Computing hash")
+
+                server_hash = decrypt_message(encrypted_hash, client_private_key)
+                local_hash = compute_sha256(original_message)
+
+                if server_hash == local_hash:
+                    print("Secure")
+                else:
+                    print("Compromised")
+
+    sys.exit()
 
 main()
